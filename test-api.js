@@ -5,11 +5,16 @@ const
     server = restify.createServer();
 
 server
-    .use(oracledbMiddleware())
+    .use(oracledbMiddleware({
+        poolPingInterval: 10,
+        // poolIncrement: 2,
+        // poolTimeout: 5
+    }))
     .get('/test', (req, res, next) => {
         req.connection
             .then(conn => conn.execute(
-                'begin :ret := systimestamp || \'\'; end;',
+                'begin dbms_lock.sleep(3); :ret := systimestamp || \'\'; end;',
+                // 'begin :ret := systimestamp || \'\'; end;',
                 {
                     ret: { dir: oracledb.BIND_OUT, type: oracledb.STRING },
                 }
@@ -23,7 +28,7 @@ server
     });
 
 setInterval(() => {
-    console.log(oracledb.getPool().connectionsInUse, oracledb.getPool().connectionsOpen);
+    console.log('used:', oracledb.getPool().connectionsInUse, 'open:', oracledb.getPool().connectionsOpen);
 }, 1000);
 
 server.listen(process.env.PORT || 8080, () => {

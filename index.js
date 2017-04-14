@@ -12,6 +12,9 @@ module.exports = function (poolConfig) {
             val = val === 'true' ? true : val === 'false' ? false : val;
             poolConfig[key.substring('ORACLEDB_'.length)] = val;
         });
+    // get polling settings for releasing connection
+    const releaseMaxRetries = getConfigParam(poolConfig, 'releaseMaxRetries', 60);
+    const releaseInterval = getConfigParam(poolConfig, 'releaseInterval', 1000);
     // create database connection pool (promise)
     const pool = oracledb.createPool(poolConfig);
     // return middleware function
@@ -19,19 +22,38 @@ module.exports = function (poolConfig) {
         // get connection from pool and put promise on request (as request.connection)
         const conn = req.connection = pool.then(pool => pool.getConnection())
         // release connection at end of request
-        const close = () => {
-            console.log('have to close connection');
+        const close = (req, res, next) => {
             conn
-                .then(c => {
-                    console.log('closing connction');
-                    return c.close();
-                })
-                .then(() => console.log('closed'))
-                .catch(err => console.error('oracledb', err))
+                // after break, releasing connection keeps failing with
+                // NJS-032: connection cannot be released because a database call is in progress
+                // see https://github.com/oracle/node-oracledb/issues/671
+                // .then(c => c.break())
+                .then(c => new Promise((resolve, reject) => {
+                    // try to close connection
+                    let attempts = 0;
+                    const ival = setInterval(() => {
+                        c.close()
+                            .then(() => {
+                                clearInterval(ival);
+                                resolve();
+                            })
+                            .catch(e => {
+                                attempts++;
+                                if (attempts > releaseMaxRetries) {
+                                    clearInterval(ival);
+                                    reject(e);
+                                }
+                            })
+                    }, releaseInterval);
+                }))
+                .catch(err => console.error('error releasing database connection', err))
         }
         res.once('finish', close);
         res.once('close', close);
         next();
-        // next();
     }
+}
+
+function getConfigParam(config, key, dflt) {
+    return typeof config[key] !== 'undefined' ? config[key] : dflt;
 }
