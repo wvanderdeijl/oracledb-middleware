@@ -17,6 +17,8 @@ module.exports = function (poolConfig) {
     const releaseInterval = getConfigParam(poolConfig, 'releaseInterval', 1000);
     // create database connection pool (promise)
     const pool = oracledb.createPool(poolConfig);
+    // Ask for initial connection to test connectivity and warm up the pool
+    pool.then(pool => pool.getConnection().then(conn => conn.close()));
     // return middleware function
     return function (req, res, next) {
         // get connection from pool and put promise on request (as request.connection)
